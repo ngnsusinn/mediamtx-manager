@@ -25,14 +25,10 @@ Compose đã nhúng sẵn config MediaMTX (`configs.content`), dùng named volum
 
 Xem stream: `rtsp://<IP>:8554/cam33` (VLC, OpenCV, ffmpeg), `http://<IP>:8889/cam33` (WebRTC), `http://<IP>:8888/cam33` (HLS).
 
-## Delay để xem mượt
-Mỗi camera có ô **delay (giây)** (0 = tắt). Khi > 0:
-- MediaMTX kéo nguồn vào path `<tên>_src`, rồi một ffmpeg chạy ngay trong container đọc lại với `-itsoffset <delay> -re` và publish ra path `<tên>`. Gói tin về dồn cục từ server gốc được giữ lại và trả ra đều đặn, nên xem mượt hơn, đổi lại **trễ so với thực tế đúng bằng số giây đặt** (đã thử: delay 6s thì trễ ~6-7s).
-- Vẫn dùng link `rtsp://<IP>:8554/<tên>` như bình thường. Gợi ý bắt đầu từ 5-10 giây cho luồng 720p/1080p hay khựng.
-- Cần image `bluenviron/mediamtx:latest-ffmpeg` (đã là mặc định trong `compose.yaml`).
-- Khi luồng nguồn đứt và nối lại, ffmpeg khởi động lại nên sẽ mất hình khoảng bằng số giây delay trước khi có lại.
-- Tốn thêm RAM bằng khoảng bitrate × delay (vd 4 Mbps × 10s ≈ 5 MB mỗi camera).
-- Delay không giúp nếu nguồn bị đứng quá lâu: khi đó vẫn khựng, chỉ là khựng sau một lúc.
+## Xem stream & chống giật
+- **WebRTC (`http://<IP>:8889/cam33`)**: Độ trễ cực thấp (< 0.5s), thích hợp khi mạng ổn định.
+- **HLS (`http://<IP>:8888/cam33`) - Chống giật (Khuyên dùng)**: Tự động đệm 2-5 giây trên trình duyệt, giúp xem cực kỳ mượt mà ngay cả khi luồng camera từ xa bị dồn cục hoặc chập chờn.
+- **RTSP (`rtsp://<IP>:8554/cam33`)**: Dành cho VLC, phần mềm AI / NVR (OpenCV, ffmpeg).
 
 ## Lưu ý
 - Link RTSP chứa mật khẩu nên **không commit** `data/cameras.json`/`.env` (đã có trong `.gitignore`).

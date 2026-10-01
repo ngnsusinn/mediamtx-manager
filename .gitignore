@@ -3,3 +3,5 @@ data/*
 !data/.gitkeep
 !data/cameras.example.json
 __pycache__/
+*.crt
+*.key
