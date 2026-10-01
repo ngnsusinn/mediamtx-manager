@@ -1,0 +1,10 @@
+{
+  "cam33": {
+    "name": "cam33",
+    "title": "AI - Y Ngông – Giải Phóng",
+    "source": "rtsp://USER:PASS@HOST:8554/PATH?realm=ioc",
+    "enabled": true,
+    "on_demand": false,
+    "transport": "tcp"
+  }
+}

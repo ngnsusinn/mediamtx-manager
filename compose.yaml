@@ -1,0 +1,70 @@
+# MediaMTX + Manager (web UI quản lý camera). Chạy được trên Arcane / docker compose.
+name: mediamtx-manager
+
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:${MEDIAMTX_TAG:-latest}
+    container_name: mediamtx
+    restart: unless-stopped
+    ports:
+      - "${RTSP_PORT:-8554}:8554"        # RTSP
+      - "${HLS_PORT:-8888}:8888"         # HLS
+      - "${WEBRTC_PORT:-8889}:8889"      # WebRTC (trang xem nhanh)
+      - "8189:8189/udp"                  # WebRTC ICE
+    configs:
+      - source: mediamtx_yml
+        target: /mediamtx.yml
+    networks: [cam]
+
+  manager:
+    image: ${MANAGER_IMAGE:-mediamtx-manager:local}
+    build: ./manager
+    container_name: mediamtx-manager
+    restart: unless-stopped
+    depends_on: [mediamtx]
+    ports:
+      - "${MANAGER_PORT:-8080}:8080"
+    environment:
+      MEDIAMTX_API: http://mediamtx:9997
+      MANAGER_USER: ${MANAGER_USER:-admin}
+      MANAGER_PASSWORD: ${MANAGER_PASSWORD:-}
+      PUBLIC_HOST: ${PUBLIC_HOST:-}
+      RTSP_PORT: ${RTSP_PORT:-8554}
+      HLS_PORT: ${HLS_PORT:-8888}
+      WEBRTC_PORT: ${WEBRTC_PORT:-8889}
+      RECONCILE_INTERVAL: ${RECONCILE_INTERVAL:-30}
+    volumes:
+      - manager_data:/data
+    networks: [cam]
+
+volumes:
+  manager_data:
+
+networks:
+  cam:
+
+# Config MediaMTX nhúng trực tiếp để Arcane không cần mount file.
+# - Cổng API 9997 KHÔNG publish ra host, chỉ mạng nội bộ compose gọi được.
+# - Người xem chỉ được read/playback; không ai publish được vào server.
+configs:
+  mediamtx_yml:
+    content: |
+      logLevel: info
+      api: yes
+      apiAddress: :9997
+      webrtcAdditionalHosts: [${WEBRTC_HOST:-127.0.0.1}]
+      authMethod: internal
+      authInternalUsers:
+        - user: any
+          pass:
+          ips: []
+          permissions:
+            - action: read
+            - action: playback
+        - user: any
+          pass:
+          ips: ['172.16.0.0/12', '10.0.0.0/8', '192.168.0.0/16', '127.0.0.1', '::1']
+          permissions:
+            - action: api
+      paths:
+        all_others:
