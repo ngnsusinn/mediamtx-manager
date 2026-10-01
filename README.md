@@ -25,10 +25,15 @@ Compose đã nhúng sẵn config MediaMTX (`configs.content`), dùng named volum
 
 Xem stream: `rtsp://<IP>:8554/cam33` (VLC, OpenCV, ffmpeg), `http://<IP>:8889/cam33` (WebRTC), `http://<IP>:8888/cam33` (HLS).
 
-## Xem stream & chống giật
-- **WebRTC (`http://<IP>:8889/cam33`)**: Độ trễ cực thấp (< 0.5s), thích hợp khi mạng ổn định.
-- **HLS (`http://<IP>:8888/cam33`) - Chống giật (Khuyên dùng)**: Tự động đệm 2-5 giây trên trình duyệt, giúp xem cực kỳ mượt mà ngay cả khi luồng camera từ xa bị dồn cục hoặc chập chờn.
-- **RTSP (`rtsp://<IP>:8554/cam33`)**: Dành cho VLC, phần mềm AI / NVR (OpenCV, ffmpeg).
+## Tối ưu & Chống giật / xé hình cho RTSP (FIFO Delay)
+Camera từ xa qua Internet thường bị dồn cục gói tin hoặc rớt gói gây hiện tượng **giật và xé hình (macroblock corruption)**. Hệ thống giải quyết bằng:
+- **Bộ đệm FIFO RAM với timeshift (`delay = 15s`)**: FFmpeg đọc luồng liên tục qua TCP, lưu vào hàng đợi RAM (`queue_size`), giữ lại đúng 15 giây rồi phát đều đặn qua RTSP.
+- **`-restart_with_keyframe 1`**: Đảm bảo luồng chỉ phát khi có Keyframe (I-frame) chuẩn, triệt tiêu hoàn toàn lỗi xé hình hay màn hình xanh/nhòe.
+- **`-c copy`**: Giữ nguyên luồng gốc (pass-through), không giải mã/mã hóa lại nên **gần như 0% CPU**.
+- **Xem stream**:
+  - **RTSP**: `rtsp://<IP>:8554/cam33` (xem qua VLC, phần mềm AI, NVR).
+  - **HLS**: `http://<IP>:8888/cam33` (xem trình duyệt có đệm).
+  - **WebRTC**: `http://<IP>:8889/cam33` (xem trực tiếp).
 
 ## Lưu ý
 - Link RTSP chứa mật khẩu nên **không commit** `data/cameras.json`/`.env` (đã có trong `.gitignore`).

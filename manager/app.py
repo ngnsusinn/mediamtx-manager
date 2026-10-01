@@ -69,14 +69,24 @@ def normalize(url: str) -> str:
 
 def build(name: str, cam: dict):
     """Trả về (paths cần có, paths cần xóa) cho 1 camera.
-    Kéo trực tiếp nguồn camera qua MediaMTX (TCP). Tự động dọn dẹp các path _src cũ nếu có."""
+    delay > 0: kéo nguồn vào <name>_src, rồi dùng ffmpeg FIFO queue muxer với timeshift
+    đệm luồng trong bộ nhớ và phát trễ D giây ra <name>, giúp chống giật và xé hình cho RTSP."""
     if not cam.get("enabled", True):
         return {}, [name, name + "_src"]
     src = normalize(cam["source"])
     base = {"source": src, "sourceOnDemand": bool(cam.get("on_demand", False))}
     if src.startswith("rtsp"):
         base["rtspTransport"] = cam.get("transport", "tcp")
-    return {name: base}, [name + "_src"]
+    delay = int(cam.get("delay", 0) or 0)
+    if delay <= 0:
+        return {name: {**base, "runOnInit": "", "runOnInitRestart": False}}, [name + "_src"]
+    queue = max(1000, delay * 250)
+    cmd = (f"ffmpeg -hide_banner -loglevel warning -rtsp_transport tcp -i rtsp://127.0.0.1:$RTSP_PORT/{name}_src "
+           f"-map 0 -c copy -f fifo -fifo_format rtsp -format_opts rtsp_transport=tcp "
+           f"-timeshift {delay} -queue_size {queue} -drop_pkts_on_overflow 1 -attempt_recovery 1 "
+           f"-restart_with_keyframe 1 rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH")
+    return ({name + "_src": {**base, "sourceOnDemand": False},
+             name: {"source": "publisher", "runOnInit": cmd, "runOnInitRestart": True}}, [])
 
 
 async def reconcile():
@@ -121,6 +131,7 @@ def upsert(d: dict, body: dict):
         "enabled": body.get("enabled", old.get("enabled", True)),
         "on_demand": body.get("on_demand", old.get("on_demand", False)),
         "transport": body.get("transport", old.get("transport", "tcp")),
+        "delay": max(0, min(120, int(body.get("delay", old.get("delay", 15)) or 0))),
         **{k: body[k] for k in ("lat", "lng") if k in body},
     }
     return name
@@ -179,7 +190,7 @@ async def import_json(request: Request):
         src = (it.get("STSPLINK") or "").strip()
         if not src: continue
         upsert(d, {"name": f"cam{it['ID']}", "title": (it.get("TEN") or "").strip(), "source": src,
-                   "lat": (it.get("LAT") or "").strip(), "lng": (it.get("LNG") or "").strip()}); n += 1
+                   "lat": (it.get("LAT") or "").strip(), "lng": (it.get("LNG") or "").strip(), "delay": 15}); n += 1
     save(d); await reconcile()
     return {"imported": n}
 
@@ -210,11 +221,12 @@ table{width:100%;border-collapse:collapse;display:block;overflow-x:auto}td,th{pa
 <input id="name" placeholder="path (vd cam33)"><input id="title" placeholder="Tên hiển thị" size="28">
 <input id="source" placeholder="rtsp://user:pass@host:port/path (trống = giữ nguyên khi sửa)" size="60">
 <select id="transport"><option>tcp</option><option>udp</option><option>automatic</option></select>
+<input id="delay" type="number" min="0" max="120" value="15" style="width:80px" title="Đệm chống giật RTSP (giây). 0 = tắt"> <span class="mut">delay (giây)</span>
 <label><input type="checkbox" id="ondemand"> chỉ kéo khi có người xem</label><button onclick="saveCam()">Lưu</button></div></details>
 <details><summary>Nhập JSON từ app Đắk Lắk Số 3.0</summary><textarea id="imp" rows="5" style="width:100%" placeholder='{"success":true,"data":[...]}'></textarea>
 <div class="row"><button onclick="imp()">Nhập</button></div></details>
 <div class="row"><button onclick="sync()">Đồng bộ lại MediaMTX</button><button onclick="load()">Làm mới</button></div>
-<table><thead><tr><th>Path</th><th>Tên</th><th>Nguồn</th><th>Trạng thái</th><th>Người xem</th><th>Liên kết</th><th></th></tr></thead><tbody id="rows"></tbody></table>
+<table><thead><tr><th>Path</th><th>Tên</th><th>Nguồn</th><th>Delay</th><th>Trạng thái</th><th>Người xem</th><th>Liên kết</th><th></th></tr></thead><tbody id="rows"></tbody></table>
 <script>
 const $=s=>document.querySelector(s),esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(p,o){const r=await fetch(p,Object.assign({headers:{'Content-Type':'application/json'}},o||{}));if(!r.ok)throw new Error(await r.text());return r.json()}
@@ -223,11 +235,11 @@ async function load(){try{const d=await api('/api/cameras');CAMS={};
 $('#sync').innerHTML=d.sync.ok===false?'<span class=err>Không nối được MediaMTX: '+esc(d.sync.error)+'</span>':'Đã đồng bộ với MediaMTX';
 $('#rows').innerHTML=d.cameras.map(c=>{CAMS[c.name]=c;const u=p=>`http://${d.host}:${d.ports[p]}/${c.name}`,rtsp=`rtsp://${d.host}:${d.ports.rtsp}/${c.name}`;
 const st=!c.enabled?'<span class=off>tắt</span>':c.ready?'<span class=on>● đang chạy</span>':'<span class=err>○ chưa có dữ liệu</span>';
-return `<tr><td><b>${esc(c.name)}</b></td><td>${esc(c.title||'')}</td><td class=mut>${esc(c.source)}</td><td>${st}</td><td>${c.readers}</td>
-<td><a href="${u('webrtc')}" target=_blank>Xem (WebRTC)</a> · <a href="${u('hls')}" target=_blank>HLS (Chống giật)</a> · <a href="#" onclick="navigator.clipboard.writeText('${rtsp}');return false">Copy RTSP</a></td>
+return `<tr><td><b>${esc(c.name)}</b></td><td>${esc(c.title||'')}</td><td class=mut>${esc(c.source)}</td><td>${c.delay?c.delay+'s':'-'}</td><td>${st}</td><td>${c.readers}</td>
+<td><a href="${u('webrtc')}" target=_blank>Xem (WebRTC)</a> · <a href="${u('hls')}" target=_blank>HLS</a> · <a href="#" onclick="navigator.clipboard.writeText('${rtsp}');return false">Copy RTSP</a></td>
 <td><button onclick="edit('${esc(c.name)}')">Sửa</button> <button onclick="tog('${esc(c.name)}')">${c.enabled?'Tắt':'Bật'}</button> <button onclick="del('${esc(c.name)}')">Xóa</button></td></tr>`}).join('')}catch(e){$('#sync').textContent=e.message}}
-function edit(n){const c=CAMS[n];$('#name').value=c.name;$('#title').value=c.title||'';$('#source').value='';$('#transport').value=c.transport||'tcp';$('#ondemand').checked=!!c.on_demand;scrollTo(0,0)}
-async function saveCam(){try{await api('/api/cameras',{method:'POST',body:JSON.stringify({name:$('#name').value,title:$('#title').value,source:$('#source').value,transport:$('#transport').value,on_demand:$('#ondemand').checked})});$('#source').value='';load()}catch(e){alert(e.message)}}
+function edit(n){const c=CAMS[n];$('#name').value=c.name;$('#title').value=c.title||'';$('#source').value='';$('#transport').value=c.transport||'tcp';$('#ondemand').checked=!!c.on_demand;$('#delay').value=c.delay!==undefined?c.delay:15;scrollTo(0,0)}
+async function saveCam(){try{await api('/api/cameras',{method:'POST',body:JSON.stringify({name:$('#name').value,title:$('#title').value,source:$('#source').value,transport:$('#transport').value,on_demand:$('#ondemand').checked,delay:+$('#delay').value||0})});$('#source').value='';load()}catch(e){alert(e.message)}}
 async function tog(n){await api(`/api/cameras/${n}/toggle`,{method:'POST'});load()}
 async function del(n){if(confirm('Xóa '+n+'?')){await api('/api/cameras/'+n,{method:'DELETE'});load()}}
 async function imp(){try{const r=await api('/api/import',{method:'POST',body:$('#imp').value});alert('Đã nhập '+r.imported+' camera');$('#imp').value='';load()}catch(e){alert(e.message)}}

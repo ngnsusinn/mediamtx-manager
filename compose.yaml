@@ -3,7 +3,7 @@ name: mediamtx-manager
 
 services:
   mediamtx:
-    image: bluenviron/mediamtx:${MEDIAMTX_TAG:-latest}
+    image: bluenviron/mediamtx:${MEDIAMTX_TAG:-latest-ffmpeg}
     container_name: mediamtx
     restart: unless-stopped
     ports:
@@ -45,13 +45,15 @@ networks:
 
 # Config MediaMTX nhúng trực tiếp để Arcane không cần mount file.
 # - Cổng API 9997 KHÔNG publish ra host, chỉ mạng nội bộ compose gọi được.
-# - Người xem chỉ được read/playback.
+# - Người xem chỉ được read/playback; chỉ ffmpeg chạy trong chính container (127.0.0.1) mới publish được
+#   (dùng cho bộ đệm FIFO delay chống giật RTSP).
 configs:
   mediamtx_yml:
     content: |
       logLevel: info
       api: yes
       apiAddress: :9997
+      writeQueueSize: 4096
       webrtcAdditionalHosts: [${WEBRTC_HOST:-127.0.0.1}]
       authMethod: internal
       authInternalUsers:
@@ -61,6 +63,11 @@ configs:
           permissions:
             - action: read
             - action: playback
+        - user: any
+          pass:
+          ips: ['127.0.0.1', '::1']
+          permissions:
+            - action: publish
         - user: any
           pass:
           ips: ['172.16.0.0/12', '10.0.0.0/8', '192.168.0.0/16', '127.0.0.1', '::1']
